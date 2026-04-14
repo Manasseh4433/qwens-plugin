@@ -97,11 +97,15 @@ module PolygonalMasonry
       Sketchup.status_text = 'Расстановка узлов...'
       distributor = NodeDistributor.new(rows, bbox, params, rng)
       row_nodes = distributor.distribute
+      total_nodes = row_nodes.reduce(0) { |s, r| s + r.length }
+      puts "PM DEBUG: rows=#{rows.length}, total_nodes=#{total_nodes}"
 
       # Шаг 5: Сопоставление швов
       Sketchup.status_text = 'Сопоставление швов...'
       matcher = SeamMatcher.new(row_nodes, params, rng)
       cell_specs_by_band = matcher.match_all
+      total_specs = cell_specs_by_band.reduce(0) { |s, b| s + b.length }
+      puts "PM DEBUG: cell_specs=#{total_specs}"
 
       # Шаг 6: Построение ячеек
       Sketchup.status_text = 'Построение ячеек...'
@@ -112,24 +116,32 @@ module PolygonalMasonry
         cells = builder.build_cells(band_idx, specs)
         all_cells << cells
       end
+      total_cells = all_cells.reduce(0) { |s, b| s + b.length }
+      puts "PM DEBUG: built_cells=#{total_cells}"
 
       # Шаг 7: Деформация швов (замковые зубья)
       Sketchup.status_text = 'Деформация швов...'
       deformer = SeamDeformer.new(all_cells, params, rng)
       deformed_cells = deformer.deform_all
+      puts "PM DEBUG: deformed_cells=#{deformed_cells.length}"
 
       # Шаг 8: Обрезка по контуру грани
       Sketchup.status_text = 'Обрезка по контуру...'
       boundary_2d = frame.face_loop_2d
+      puts "PM DEBUG: boundary points=#{boundary_2d.length}"
 
       clipped_cells = []
+      clipped_out = 0
       deformed_cells.each do |cell|
         clipped = PolygonClip.clip_polygon(cell.points2d, boundary_2d)
-        next unless clipped && clipped.length >= 3
-
-        cell.points2d = clipped
-        clipped_cells << cell
+        if clipped && clipped.length >= 3
+          cell.points2d = clipped
+          clipped_cells << cell
+        else
+          clipped_out += 1
+        end
       end
+      puts "PM DEBUG: clipped_out=#{clipped_out}, kept=#{clipped_cells.length}"
 
       # Шаг 9: Валидация
       Sketchup.status_text = 'Валидация камней...'
