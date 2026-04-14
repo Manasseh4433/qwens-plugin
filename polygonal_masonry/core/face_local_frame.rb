@@ -30,7 +30,7 @@ module PolygonalMasonry
 
     # 3D -> 2D [x, y]
     def to_2d(pt3d)
-      vec = pt3d.offset(@origin)
+      vec = pt3d - @origin
       x = vec.dot(@u)
       y = vec.dot(@v)
       [x, y]
@@ -59,7 +59,7 @@ module PolygonalMasonry
       tolerance = 0.001  # дюймы
       @face.vertices.each do |v|
         pt = v.position
-        vec = pt.offset(@origin)
+        vec = pt - @origin
         dist = vec.dot(@normal).abs
         return false if dist > tolerance
       end
