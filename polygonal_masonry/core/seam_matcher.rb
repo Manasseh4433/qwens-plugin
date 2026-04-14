@@ -77,11 +77,15 @@ module PolygonalMasonry
 
       # Добить оставшиеся
       while ti < top_nodes.length - 1
-        cells << CellSpec.new(ti..(ti+1), [bi, bot_nodes.length-2].clamp(0, bot_nodes.length-2)..(bot_nodes.length-1), :one_to_one)
+        last_bi = bot_nodes.length - 2
+        last_bi = 0 if last_bi < 0
+        cells << CellSpec.new(ti..(ti+1), last_bi..(bot_nodes.length-1), :one_to_one)
         ti += 1
       end
       while bi < bot_nodes.length - 1
-        cells << CellSpec.new([ti, top_nodes.length-2].clamp(0, top_nodes.length-2)..(top_nodes.length-1), bi..(bi+1), :one_to_one)
+        last_ti = top_nodes.length - 2
+        last_ti = 0 if last_ti < 0
+        cells << CellSpec.new(last_ti..(top_nodes.length-1), bi..(bi+1), :one_to_one)
         bi += 1
       end
 
