@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# SketchUp
+._*
+SketchUp/
+
+# Ruby
+*.gem
+*.rbc
+/.bundle/
+/coverage/
+/pkg/
+/spec/reports/
+
+# Local config (if any)
+*.local.rb
