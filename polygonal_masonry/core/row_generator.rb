@@ -1,88 +1,76 @@
 # encoding: UTF-8
-# RowGenerator — генерация волнистых рядовых кривых
+# Генерация волнистых рядовых кривых
 
 module PolygonalMasonry
-  class RowGenerator
-    # Кривая ряда: массив [[x, y], ...] с монотонным x
-    RowCurve = Struct.new(:samples) do
-      def y_at(x)
-        PolygonalMasonry::Geom2D.polyline_y_at_x(samples, x)
-      end
-    end
+  RowCurve = Struct.new(:samples)  # [[x,y], [x,y], ...]
 
-    def initialize(bbox2d, params, rng)
-      @bbox   = bbox2d
+  class RowGenerator
+    def initialize(bbox, params, rng)
+      @bbox = bbox
       @params = params
-      @rng    = rng
+      @rng = rng
+      @ymin = bbox[:ymin]
+      @ymax = bbox[:ymax]
+      @xmin = bbox[:xmin]
+      @xmax = bbox[:xmax]
     end
 
     def build_rows
-      xmin = @bbox[:xmin]; xmax = @bbox[:xmax]
-      ymin = @bbox[:ymin]; ymax = @bbox[:ymax]
-
       rows = []
+      y = @ymin
 
-      # Нижняя граница — прямая линия
-      rows << make_straight_curve(xmin, xmax, ymin)
+      # Первый ряд — прямая по нижнему краю
+      rows << make_straight_row(y)
 
-      y_current = ymin
       loop do
-        delta = @params[:row_height_mean] +
-                (@rng.rand * 2 - 1) * @params[:row_height_jitter]
-        min_h = @params[:min_stone_height] || @params[:row_height_mean] * 0.4
-        delta = [min_h, delta].max
-        y_current += delta
-        break if y_current >= ymax - min_h * 0.5
-        rows << make_wavy_curve(xmin, xmax, y_current)
+        # Случайный шаг высоты
+        jitter = (@rng.rand * 2 - 1) * @params[:row_height_jitter]
+        step = @params[:row_height_mean] + jitter
+        step = [step, @params[:min_edge] * 2].max  # минимальный зазор
+
+        y += step
+        break if y >= @ymax - @params[:min_edge]
+
+        rows << make_wavy_row(y)
       end
 
-      # Верхняя граница — прямая линия
-      rows << make_straight_curve(xmin, xmax, ymax)
+      # Последний ряд — прямая по верхнему краю
+      rows << make_straight_row(@ymax)
+
+      # Проверка: минимум 2 ряда
+      rows << make_straight_row(@ymax) if rows.length < 2
 
       rows
     end
 
     private
 
-    def make_straight_curve(xmin, xmax, y)
-      samples = linspace(xmin, xmax, 4).map { |x| [x, y] }
-      RowCurve.new(samples)
+    def make_straight_row(y)
+      samples = generate_x_samples
+      samples.map { |x| [x, y] }
     end
 
-    def make_wavy_curve(xmin, xmax, y_base)
-      amplitude  = @params[:row_curve_amplitude] || 0.0
-      wavelength = @params[:row_curve_wavelength] || (xmax - xmin)
-      phase      = @rng.rand * Math::PI * 2
+    def make_wavy_row(y_base)
+      samples = generate_x_samples
+      amplitude = @params[:row_curve_amplitude]
+      wavelength = @params[:row_curve_wavelength]
+      phase = @rng.rand * 2 * Math::PI
 
-      # Количество сэмплов: чем шире, тем больше (но не менее 12)
-      width     = xmax - xmin
-      n_samples = [[12, (width / (wavelength * 0.3)).ceil].max, 40].min
-
-      samples = linspace(xmin, xmax, n_samples).map do |x|
-        # Синусоидальная волна + небольшой случайный шум
-        wave  = amplitude * Math.sin(2 * Math::PI * x / wavelength + phase)
-        noise = (@rng.rand * 2 - 1) * amplitude * 0.15
-        [x, y_base + wave + noise]
+      samples.map do |x|
+        dy = amplitude * Math.sin(2 * Math::PI * x / wavelength + phase)
+        [x, y_base + dy]
       end
-
-      # Сглаживание: скользящее среднее по 3 точкам
-      smoothed = samples.dup
-      1.upto(samples.size - 2) do |i|
-        smoothed[i] = [
-          samples[i][0],
-          (samples[i-1][1] + samples[i][1] + samples[i+1][1]) / 3.0
-        ]
-      end
-
-      # Монотонность по x гарантирована linspace, но проверим y-диапазон
-      # (кривые не должны "уходить" слишком далеко)
-      RowCurve.new(smoothed)
     end
 
-    def linspace(a, b, n)
-      return [a] if n <= 1
-      step = (b - a).to_f / (n - 1)
-      (0...n).map { |i| a + i * step }
+    def generate_x_samples
+      step = @params[:stone_width_mean] / 4.0
+      step = [step, (@xmax - @xmin) / 60.0].max  # минимум 60 сэмплов
+      step = [step, (@xmax - @xmin) / 3.0].min   # максимум ~3 сэмпла
+
+      n = ((@xmax - @xmin) / step).to_i
+      n = [n, 4].max
+
+      (0..n).map { |i| @xmin + i * (@xmax - @xmin) / n.to_f }
     end
   end
 end

@@ -1,99 +1,91 @@
 # encoding: UTF-8
-# SeamMatcher — разметка камней в полосе через x-координаты (без зазоров гарантировано)
-# Версия 3: работает с x-позициями, не с индексами узлов
+# Монотонное сопоставление узлов соседних рядов
 
 module PolygonalMasonry
-  class SeamMatcher
-    # CellSpec описывает один камень через x-координаты границ.
-    # Индексы top/bot нужны только для доступа к промежуточным узлам кривой.
-    CellSpec = Struct.new(:x_left, :x_right,
-                          :top_from, :top_to,
-                          :bot_from, :bot_to,
-                          :kind)
+  # CellSpec описывает камень: диапазон top-узлов и bottom-узлов
+  CellSpec = Struct.new(:top_range, :bottom_range, :kind)
 
-    def initialize(params, rng)
+  class SeamMatcher
+    def initialize(row_nodes, params, rng)
+      @row_nodes = row_nodes  # [row_idx] -> [Node, ...]
       @params = params
-      @rng    = rng
+      @rng = rng
     end
 
-    # top_nodes, bot_nodes — массивы Node (Struct с полями x, y)
-    # Возвращает Array[CellSpec] с гарантией:
-    #   specs[i].x_right == specs[i+1].x_left  (нет зазоров)
-    def match(top_nodes, bot_nodes)
-      # ШАГ 1: строим единую сетку x-позиций всех внутренних швов полосы
-      # Включаем все x из обоих рядов
-      top_xs = top_nodes.map(&:x)
-      bot_xs = bot_nodes.map(&:x)
-      xmin = [top_xs.first, bot_xs.first].min
-      xmax = [top_xs.last,  bot_xs.last ].max
+    def match_all
+      # [band_idx] -> [CellSpec, ...]
+      bands = []
 
-      # Все внутренние x (без крайних — они общие у обоих)
-      all_inner = (top_xs[1..-2] + bot_xs[1..-2]).uniq.sort
-      all_xs = ([xmin] + all_inner + [xmax]).uniq.sort
+      (0...(@row_nodes.length - 1)).each do |k|
+        top_nodes = @row_nodes[k]
+        bot_nodes = @row_nodes[k + 1]
 
-      # ШАГ 2: строим атомарные сегменты (один сегмент = один базовый камень)
-      atomic = []
-      all_xs.each_cons(2) do |x_l, x_r|
-        next if (x_r - x_l) < (@params[:min_stone_width] || 0) * 0.3
-        ti_l = nearest_idx(top_nodes, x_l)
-        ti_r = nearest_idx(top_nodes, x_r)
-        bi_l = nearest_idx(bot_nodes, x_l)
-        bi_r = nearest_idx(bot_nodes, x_r)
-        atomic << CellSpec.new(x_l, x_r, ti_l, ti_r, bi_l, bi_r, :normal)
+        specs = match_band(top_nodes, bot_nodes)
+        bands << specs
       end
 
-      return atomic if atomic.empty?
-
-      # ШАГ 3: вероятностное объединение соседних атомарных сегментов
-      merge_segments(atomic, top_nodes, bot_nodes)
+      bands
     end
 
     private
 
-    # Объединяет соседние сегменты с вероятностью p_merge.
-    # ГАРАНТИЯ: x_right одного = x_left следующего (т.к. мы берём x_right
-    # из объединённого сегмента напрямую).
-    def merge_segments(atomic, top_nodes, bot_nodes)
-      result = []
-      i = 0
-      while i < atomic.size
-        spec = atomic[i]
-        can_merge = i + 1 < atomic.size
-        # Не объединять если результат будет слишком широким
-        if can_merge
-          next_spec = atomic[i + 1]
-          merged_w  = next_spec.x_right - spec.x_left
-          max_w = (@params[:stone_width_mean] || 10) * 2.2
-          can_merge = merged_w <= max_w
-        end
+    def match_band(top_nodes, bot_nodes)
+      cells = []
+      ti = 0  # индекс в top
+      bi = 0  # индекс в bottom
 
-        if can_merge && @rng.rand < (@params[:one_to_two_prob] || 0.20)
-          next_spec = atomic[i + 1]
-          # Объединяем: x_left от текущего, x_right от следующего
-          merged = CellSpec.new(
-            spec.x_left,           next_spec.x_right,
-            spec.top_from,         next_spec.top_to,
-            spec.bot_from,         next_spec.bot_to,
-            :normal
-          )
-          result << merged
-          i += 2
+      while ti < top_nodes.length - 1 && bi < bot_nodes.length - 1
+        top_right = top_nodes[ti + 1].x
+        bot_right = bot_nodes[bi + 1].x
+        top_left = top_nodes[ti].x
+        bot_left = bot_nodes[bi].x
+
+        top_span = top_right - top_left
+        bot_span = bot_right - bot_left
+
+        # Выбор режима
+        roll = @rng.rand
+        if roll < @params[:one_to_one_prob]
+          # one_to_one: 1 top интервал <-> 1 bot интервал
+          cells << CellSpec.new(ti..(ti+1), bi..(bi+1), :one_to_one)
+          ti += 1
+          bi += 1
+        elsif roll < @params[:one_to_one_prob] + @params[:one_to_two_prob]
+          # one_to_two: 1 top -> 2 bot (top шире)
+          if bi + 2 < bot_nodes.length
+            cells << CellSpec.new(ti..(ti+1), bi..(bi+2), :one_to_two)
+            ti += 1
+            bi += 2
+          else
+            cells << CellSpec.new(ti..(ti+1), bi..(bi+1), :one_to_one)
+            ti += 1
+            bi += 1
+          end
         else
-          result << spec
-          i += 1
+          # two_to_one: 2 top -> 1 bot
+          if ti + 2 < top_nodes.length
+            cells << CellSpec.new(ti..(ti+2), bi..(bi+1), :two_to_one)
+            ti += 2
+            bi += 1
+          else
+            cells << CellSpec.new(ti..(ti+1), bi..(bi+1), :one_to_one)
+            ti += 1
+            bi += 1
+          end
         end
       end
-      result
-    end
 
-    def nearest_idx(nodes, x)
-      best_i = 0
-      best_d = (nodes[0].x - x).abs
-      nodes.each_with_index do |n, idx|
-        d = (n.x - x).abs
-        if d < best_d; best_d = d; best_i = idx; end
+      # Добить оставшиеся
+      while ti < top_nodes.length - 1
+        cells << CellSpec.new(ti..(ti+1), [bi, bot_nodes.length-2].clamp(0, bot_nodes.length-2)..(bot_nodes.length-1), :one_to_one)
+        ti += 1
       end
-      best_i
+      while bi < bot_nodes.length - 1
+        cells << CellSpec.new([ti, top_nodes.length-2].clamp(0, top_nodes.length-2)..(top_nodes.length-1), bi..(bi+1), :one_to_one)
+        bi += 1
+      end
+
+      cells
     end
   end
 end

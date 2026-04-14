@@ -1,88 +1,77 @@
 # encoding: UTF-8
-# StoneValidator — фильтрует дефектные камни и маркирует замковые
+# Фильтрация и маркировка камней
 
 module PolygonalMasonry
+  ValidatedStone = Struct.new(:points2d, :kind, :area, :centroid)
+
   class StoneValidator
-
-    ValidatedStone = Struct.new(:points2d, :kind, :area, :centroid)
-
     def initialize(params)
       @params = params
     end
 
-    # cells — Array[StoneCell]
-    # Возвращает Array[ValidatedStone]
     def filter_and_repair(cells)
-      result = []
+      valid = []
+
       cells.each do |cell|
-        pts = cell.points2d
-        next if pts.nil? || pts.size < 3
+        next unless valid_polygon?(cell.points2d)
+        next unless sufficient_area?(cell.points2d)
+        next unless sufficient_angle?(cell.points2d)
 
-        # Убрать дублирующиеся точки
-        pts = remove_duplicates(pts)
-        next if pts.size < 3
+        kind = classify_stone(cell)
+        area = Geom2D.polygon_area(cell.points2d).abs
+        centroid = Geom2D.polygon_centroid(cell.points2d)
 
-        # Проверить самопересечение (упрощённо: площадь должна быть > 0)
-        area = Geom2D.polygon_area(pts).abs
-        # Порог для краевых (обрезанных) камней — 40% от min_area
-        next if area < (@params[:min_area] || 0.01) * 0.40
-
-        # Минимальный угол — смягчённый фильтр (18° вместо 26°)
-        min_ang = Geom2D.min_interior_angle_deg(pts)
-        min_allowed = [(@params[:min_angle_deg] || 20.0) * 0.70, 18.0].max
-        next if min_ang < min_allowed
-
-        # Максимальное соотношение сторон (bbox) — увеличено до 8 для краевых камней
-        bbox   = Geom2D.bbox(pts)
-        bw     = bbox[:xmax] - bbox[:xmin]
-        bh     = bbox[:ymax] - bbox[:ymin]
-        aspect = [bw, bh].max / ([bw, bh].min + 1e-10)
-        next if aspect > 8.0
-
-        # Определяем kind
-        kind = detect_kind(pts, cell.kind, bbox)
-
-        centroid = Geom2D.polygon_centroid(pts)
-        result << ValidatedStone.new(pts, kind, area, centroid)
+        valid << ValidatedStone.new(cell.points2d, kind, area, centroid)
       end
-      result
+
+      valid
     end
 
     private
 
-    def remove_duplicates(pts)
-      eps = 1e-6
-      result = [pts[0]]
-      pts[1..].each do |p|
-        last = result.last
-        dist = Math.sqrt((p[0]-last[0])**2 + (p[1]-last[1])**2)
-        result << p if dist > eps
+    def valid_polygon?(pts)
+      return false if pts.nil? || pts.length < 3
+      # Проверка самопересечений (простая)
+      n = pts.length
+      return false if n > 100  # слишком много вершин — артефакт
+
+      # Проверка коллинеарности
+      (0...n).each do |i|
+        p1 = pts[i]
+        p2 = pts[(i + 1) % n]
+        return false if Geom2D.distance(p1, p2) < @params[:min_edge] * 0.5
       end
-      # Проверить последнюю и первую
-      if result.size > 1
-        first = result.first; last = result.last
-        dist = Math.sqrt((first[0]-last[0])**2 + (first[1]-last[1])**2)
-        result.pop if dist < 1e-6
-      end
-      result
+
+      true
     end
 
-    def detect_kind(pts, original_kind, bbox)
-      return :key if original_kind == :key
+    def sufficient_area?(pts)
+      area = Geom2D.polygon_area(pts).abs
+      area >= @params[:min_area]
+    end
 
-      # Автоопределение замкового камня:
-      # верхняя ширина сильно отличается от нижней
-      top_pts = pts.select { |p| (p[1] - bbox[:ymax]).abs < (bbox[:ymax]-bbox[:ymin])*0.25 }
-      bot_pts = pts.select { |p| (p[1] - bbox[:ymin]).abs < (bbox[:ymax]-bbox[:ymin])*0.25 }
+    def sufficient_angle?(pts)
+      angle = Geom2D.min_interior_angle(pts)
+      angle >= @params[:min_angle_deg]
+    end
 
-      if top_pts.size >= 2 && bot_pts.size >= 2
-        top_w = top_pts.map{|p|p[0]}.max - top_pts.map{|p|p[0]}.min
-        bot_w = bot_pts.map{|p|p[0]}.max - bot_pts.map{|p|p[0]}.min
-        ratio = [top_w, bot_w].min / ([top_w, bot_w].max + 1e-10)
-        return :key if ratio < 0.78
-      end
+    def classify_stone(cell)
+      # Простая эвристика: one_to_two / two_to_one = замковый
+      return :key if cell.kind == :key
 
-      original_kind || :normal
+      # Проверка асимметрии bbox
+      pts = cell.points2d
+      xs = pts.map { |p| p[0] }
+      ys = pts.map { |p| p[1] }
+      w = xs.max - xs.min
+      h = ys.max - ys.min
+      return :normal if w < 0.001 || h < 0.001
+
+      # Если соотношение сторон слишком большое — edge
+      ratio = [w, h].max / [w, h].min
+      return :edge if ratio > 5.0
+
+      :normal
     end
   end
 end

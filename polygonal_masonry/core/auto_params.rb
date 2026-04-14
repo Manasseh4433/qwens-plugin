@@ -1,58 +1,57 @@
 # encoding: UTF-8
-# AutoParams — автоматический выбор параметров кладки по размерам грани
+# Автомасштаб параметров по размеру грани
 
 module PolygonalMasonry
   class AutoParams
-    TARGET_STONE_COUNT = 60
-    ASPECT_RATIO       = 1.4   # идеальное соотношение ширина:высота камня
+    TARGET_STONE_COUNT_RANGE = 30..120
+    ASPECT_RATIO_IDEAL = 1.4
 
-    # bbox2d: { xmin, xmax, ymin, ymax } в дюймах (единицы SketchUp)
-    def initialize(bbox2d)
-      @bbox = bbox2d
+    def initialize(bbox)
+      @bbox = bbox
+      @width = bbox[:xmax] - bbox[:xmin]
+      @height = bbox[:ymax] - bbox[:ymin]
     end
 
     def compute
-      w = @bbox[:xmax] - @bbox[:xmin]
-      h = @bbox[:ymax] - @bbox[:ymin]
-      area = w * h
+      area = @width * @height
+      target_count = compute_target_count(area)
+      stone_area = area / target_count.to_f
 
-      # Площадь одного камня
-      stone_area = area.to_f / TARGET_STONE_COUNT
+      stone_height = Math.sqrt(stone_area / ASPECT_RATIO_IDEAL)
+      stone_width = stone_area / stone_height
 
-      # Размеры камня из соотношения сторон
-      sh = Math.sqrt(stone_area / ASPECT_RATIO)
-      sw = stone_area / sh
-
-      # Количество рядов
-      n_rows = [(h / sh).round, 3].max
-      row_h  = h.to_f / n_rows
-
-      # Ограничения снизу (минимум 3 дюйма = ~76 мм)
-      sh = [sh, 3.0].max
-      sw = [sw, 4.0].max
-      row_h = [row_h, sh].max
+      n_rows = (@height / stone_height).round
+      n_rows = [n_rows, 2].max
+      row_height_mean = @height / n_rows.to_f
 
       {
-        row_height_mean:     row_h,
-        row_height_jitter:   row_h * 0.28,
-        stone_width_mean:    sw,
-        stone_width_jitter:  sw * 0.33,
-        row_curve_amplitude: row_h * 0.12,
-        row_curve_wavelength: sw * 2.5,
-        seam_jitter:         sw * 0.12,
-        key_stone_ratio:     0.20,
-        key_tooth_depth:     sw * 0.15,
-        key_tooth_depth_min: sw * 0.06,
-        min_stone_height:    sh * 0.38,
-        min_stone_width:     sw * 0.30,
-        min_area:            sh * sw * 0.08,
-        min_angle_deg:       26.0,
-        joint_width:         0.0,
-        one_to_one_prob:     0.60,
-        one_to_two_prob:     0.20,
-        two_to_one_prob:     0.20,
-        seed:                nil
+        row_height_mean:      row_height_mean,
+        row_height_jitter:    row_height_mean * 0.25,
+        stone_width_mean:     stone_width,
+        stone_width_jitter:   stone_width * 0.3,
+        row_curve_amplitude:  row_height_mean * 0.12,
+        row_curve_wavelength: stone_width * 3.0,
+        seam_jitter:          stone_width * 0.12,
+        key_stone_ratio:      0.20,
+        key_tooth_depth:      stone_width * 0.15,
+        key_tooth_depth_min:  stone_width * 0.05,
+        min_edge:             [stone_width * 0.1, 0.2].min,
+        min_area:             stone_area * 0.1,
+        min_angle_deg:        26.0,
+        joint_width:          0.0,
+        one_to_one_prob:      0.60,
+        one_to_two_prob:      0.20,
+        two_to_one_prob:      0.20,
+        seed:                 nil
       }
+    end
+
+    private
+
+    def compute_target_count(area)
+      # Эвристика: больше площадь -> больше камней, но в диапазоне
+      count = (area / 1000.0).round  # настраиваемый коэффициент
+      [[count, TARGET_STONE_COUNT_RANGE.begin].max, TARGET_STONE_COUNT_RANGE.end].min
     end
   end
 end
