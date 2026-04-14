@@ -46,29 +46,7 @@ module PolygonalMasonry
 
     face = entity
 
-    # Проверить плоскостность
-    loop3d = face.outer_loop.vertices.map(&:position)
-    if loop3d.length < 3
-      UI.messagebox("Грань должна иметь минимум 3 вершины.", MB_OK)
-      return
-    end
-
-    # Проверить минимальный размер
-    bbox_approx = loop3d.map { |p| [p.x, p.y, p.z] }
-    xs = bbox_approx.map { |p| p[0] }
-    ys = bbox_approx.map { |p| p[1] }
-    zs = bbox_approx.map { |p| p[2] }
-    width = xs.max - xs.min
-    height = ys.max - ys.min
-    depth = zs.max - zs.min
-
-    min_dim = [width, height, depth].min
-    if min_dim < 0.1  # меньше ~25мм
-      UI.messagebox("Грань слишком маленькая. Минимальный размер: ~25мм.", MB_OK)
-      return
-    end
-
-    Sketchup.status_text = 'Рядная полигональная кладка: анализ грании...'
+    Sketchup.status_text = 'Рядная полигональная кладка: анализ грани...'
 
     begin
       # Шаг 1: Локальная система координат
@@ -80,6 +58,16 @@ module PolygonalMasonry
       end
 
       bbox = frame.bbox_2d
+      local_width = bbox[:xmax] - bbox[:xmin]
+      local_height = bbox[:ymax] - bbox[:ymin]
+
+      # Проверка минимального размера в локальной системе координат
+      min_dim = [local_width, local_height].min
+      if min_dim < 1.0  # ~25 мм
+        UI.messagebox("Грань слишком маленькая. Минимальный размер: ~25 мм.", MB_OK)
+        Sketchup.status_text = ''
+        return
+      end
 
       # Шаг 2: Автопараметры
       auto = AutoParams.new(bbox)
