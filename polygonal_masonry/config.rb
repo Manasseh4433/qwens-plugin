@@ -20,7 +20,7 @@ module PolygonalMasonry
       key_tooth_depth:        7.087.mm,     # ~180mm глубина зуба
       key_tooth_depth_min:    2.362.mm,     # ~60mm мин глубина зуба
       min_edge:               4.724.mm,     # ~120mm мин ребро
-      min_area:               0.06.m2,      # мин площадь камня
+      min_area:               9.3,          # мин площадь камня (кв. дюймы, ~60 см²)
       min_angle_deg:         26.0,          # мин внутренний угол
       joint_width:            0.mm,         # ширина шва (0 = линии)
       one_to_one_prob:       0.60,
